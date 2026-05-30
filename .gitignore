@@ -1,0 +1,14 @@
+*.o
+*.a
+*.so
+
+*.exe
+*.out
+
+build/
+dist/
+
+*.log
+
+client/myRPC-client
+server/myRPC-server
