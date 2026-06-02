@@ -6,6 +6,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "../libmysyslog/mysyslog.h"
+
 #define DEFAULT_PORT 8642
 #define DEFAULT_SOCKET_TYPE "stream"
 #define CONFIG_PATH "../configs/myRPC.conf"
@@ -34,7 +36,7 @@ static int load_config(const char *path, ServerConfig *config)
 
     if (file == NULL)
     {
-        perror("fopen");
+        mysyslog_error("configuration file open failed");
         return -1;
     }
 
@@ -64,7 +66,7 @@ static int is_user_allowed(const char *username)
 
     if (file == NULL)
     {
-        perror("fopen");
+        mysyslog_error("users configuration file open failed");
         return 0;
     }
 
@@ -85,7 +87,7 @@ static int is_user_allowed(const char *username)
 
 static void print_config(const ServerConfig *config)
 {
-    printf("myRPC-server started\n");
+    mysyslog_info("myRPC-server started");
     printf("Port: %d\n", config->port);
     printf("Socket type: %s\n", config->socket_type);
 }
@@ -98,7 +100,7 @@ static int create_server_socket(void)
 
     if (server_socket < 0)
     {
-        perror("socket");
+        mysyslog_error("socket creation failed");
         return -1;
     }
 
@@ -119,7 +121,7 @@ static int bind_server_socket(int server_socket, int port)
              (struct sockaddr *)&server_address,
              sizeof(server_address)) < 0)
     {
-        perror("bind");
+        mysyslog_error("socket bind failed");
         return -1;
     }
 
@@ -130,7 +132,7 @@ static int start_listening(int server_socket)
 {
     if (listen(server_socket, 5) < 0)
     {
-        perror("listen");
+        mysyslog_error("listen failed");
         return -1;
     }
 
@@ -151,7 +153,7 @@ static int accept_client(int server_socket)
 
     if (client_socket < 0)
     {
-        perror("accept");
+        mysyslog_error("client accept failed");
         return -1;
     }
 
@@ -176,13 +178,13 @@ static int receive_client_request(int client_socket,
 
     if (bytes_received < 0)
     {
-        perror("recv");
+        mysyslog_error("request receiving failed");
         return -1;
     }
 
     if (bytes_received == 0)
     {
-        printf("Client disconnected\n");
+        mysyslog_info("client disconnected");
         return -1;
     }
 
@@ -208,7 +210,7 @@ static int execute_command(const char *command,
 
     if (pipe == NULL)
     {
-        perror("popen");
+        mysyslog_error("command execution failed");
         snprintf(result, result_size, "Command execution failed\n");
         return -1;
     }
@@ -246,7 +248,7 @@ static int send_server_response(int client_socket,
              strlen(response),
              0) < 0)
     {
-        perror("send");
+        mysyslog_error("response sending failed");
         return -1;
     }
 
@@ -266,18 +268,18 @@ int main(void)
 
     if (load_config(CONFIG_PATH, &config) < 0)
     {
-        printf("Default server configuration is used\n");
+        mysyslog_info("default server configuration is used");
     }
 
     print_config(&config);
 
     if (!is_user_allowed(current_user))
     {
-        printf("Access denied for %s\n", current_user);
+        mysyslog_error("access denied");
         return EXIT_FAILURE;
     }
 
-    printf("Access granted for %s\n", current_user);
+    mysyslog_info("access granted");
 
     server_socket = create_server_socket();
 
@@ -292,7 +294,7 @@ int main(void)
         return EXIT_FAILURE;
     }
 
-    printf("Server bound to port %d\n", config.port);
+    mysyslog_info("server socket bound");
 
     if (start_listening(server_socket) < 0)
     {
@@ -300,7 +302,7 @@ int main(void)
         return EXIT_FAILURE;
     }
 
-    printf("Server is listening\n");
+    mysyslog_info("server is listening");
 
     client_socket = accept_client(server_socket);
 
@@ -310,7 +312,7 @@ int main(void)
         return EXIT_FAILURE;
     }
 
-    printf("Client accepted\n");
+    mysyslog_info("client accepted");
 
     if (receive_client_request(client_socket,
                                command,
