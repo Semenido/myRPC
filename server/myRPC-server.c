@@ -1,3 +1,5 @@
+#define _GNU_SOURCE
+
 #include <arpa/inet.h>
 #include <errno.h>
 #include <signal.h>
@@ -13,38 +15,41 @@
 
 #define DEFAULT_PORT 8642
 #define DEFAULT_SOCKET_TYPE "stream"
-#define CONFIG_PATH "../configs/myRPC.conf"
-#define USERS_PATH "../configs/users.conf"
+#define DEFAULT_DAEMON_MODE 0
+
+#define CONFIG_PATH "/etc/myRPC/myRPC.conf"
+#define USERS_PATH "/etc/myRPC/users.conf"
+
+#define LOCAL_CONFIG_PATH "../configs/myRPC.conf"
+#define LOCAL_USERS_PATH "../configs/users.conf"
+
 #define RESULT_SIZE 4096
+#define REQUEST_SIZE 1024
 
 typedef struct
 {
     int port;
+    int daemon_mode;
     char socket_type[16];
 } ServerConfig;
 
 static volatile sig_atomic_t server_running = 1;
 static volatile sig_atomic_t reload_config = 0;
+static volatile sig_atomic_t child_finished = 0;
 
 static void handle_signal(int signal_number)
 {
     if (signal_number == SIGINT)
     {
-        mysyslog_info("SIGINT received, server stopping");
         server_running = 0;
     }
     else if (signal_number == SIGHUP)
     {
-        mysyslog_info("SIGHUP received, configuration reload requested");
         reload_config = 1;
     }
     else if (signal_number == SIGCHLD)
     {
-        mysyslog_info("SIGCHLD received, child process finished");
-
-        while (waitpid(-1, NULL, WNOHANG) > 0)
-        {
-        }
+        child_finished = 1;
     }
 }
 
@@ -55,13 +60,24 @@ static void setup_signal_handlers(void)
     signal(SIGCHLD, handle_signal);
 }
 
+static void reap_child_processes(void)
+{
+    while (waitpid(-1, NULL, WNOHANG) > 0)
+    {
+    }
+
+    child_finished = 0;
+    mysyslog_info("child process finished");
+}
+
 static void set_default_config(ServerConfig *config)
 {
     config->port = DEFAULT_PORT;
+    config->daemon_mode = DEFAULT_DAEMON_MODE;
     strcpy(config->socket_type, DEFAULT_SOCKET_TYPE);
 }
 
-static int load_config(const char *path, ServerConfig *config)
+static int load_config_from_path(const char *path, ServerConfig *config)
 {
     FILE *file;
     char key[64];
@@ -71,7 +87,6 @@ static int load_config(const char *path, ServerConfig *config)
 
     if (file == NULL)
     {
-        mysyslog_error("configuration file open failed");
         return -1;
     }
 
@@ -86,22 +101,92 @@ static int load_config(const char *path, ServerConfig *config)
             strncpy(config->socket_type, value, sizeof(config->socket_type) - 1);
             config->socket_type[sizeof(config->socket_type) - 1] = '\0';
         }
+        else if (strcmp(key, "daemon_mode") == 0)
+        {
+            config->daemon_mode = atoi(value);
+        }
     }
 
     fclose(file);
     return 0;
 }
 
-static int is_user_allowed(const char *username)
+static int load_config(ServerConfig *config)
+{
+    if (load_config_from_path(CONFIG_PATH, config) == 0)
+    {
+        mysyslog_info("configuration loaded from /etc/myRPC");
+        return 0;
+    }
+
+    if (load_config_from_path(LOCAL_CONFIG_PATH, config) == 0)
+    {
+        mysyslog_info("configuration loaded from local configs directory");
+        return 0;
+    }
+
+    mysyslog_error("configuration file open failed");
+    return -1;
+}
+
+static int start_daemon_mode(void)
+{
+    pid_t pid;
+
+    pid = fork();
+
+    if (pid < 0)
+    {
+        mysyslog_error("first daemon fork failed");
+        return -1;
+    }
+
+    if (pid > 0)
+    {
+        exit(EXIT_SUCCESS);
+    }
+
+    if (setsid() < 0)
+    {
+        mysyslog_error("setsid failed");
+        return -1;
+    }
+
+    pid = fork();
+
+    if (pid < 0)
+    {
+        mysyslog_error("second daemon fork failed");
+        return -1;
+    }
+
+    if (pid > 0)
+    {
+        exit(EXIT_SUCCESS);
+    }
+
+    if (chdir("/") < 0)
+    {
+        mysyslog_error("chdir failed");
+        return -1;
+    }
+
+    close(STDIN_FILENO);
+    close(STDOUT_FILENO);
+    close(STDERR_FILENO);
+
+    return 0;
+}
+
+static int is_user_allowed_from_path(const char *path, const char *username)
 {
     FILE *file;
     char line[128];
 
-    file = fopen(USERS_PATH, "r");
+    file = fopen(path, "r");
 
     if (file == NULL)
     {
-        mysyslog_error("users configuration file open failed");
         return 0;
     }
 
@@ -117,6 +202,21 @@ static int is_user_allowed(const char *username)
     }
 
     fclose(file);
+    return 0;
+}
+
+static int is_user_allowed(const char *username)
+{
+    if (is_user_allowed_from_path(USERS_PATH, username))
+    {
+        return 1;
+    }
+
+    if (is_user_allowed_from_path(LOCAL_USERS_PATH, username))
+    {
+        return 1;
+    }
+
     return 0;
 }
 
@@ -165,6 +265,7 @@ static void print_config(const ServerConfig *config)
     mysyslog_info("myRPC-server started");
     printf("Port: %d\n", config->port);
     printf("Socket type: %s\n", config->socket_type);
+    printf("Daemon mode: %d\n", config->daemon_mode);
 }
 
 static int create_server_socket(void)
@@ -242,17 +343,15 @@ static int accept_client(int server_socket)
 
     if (client_socket < 0)
     {
-        if (errno == EINTR)
+        if (errno != EINTR)
         {
-            return -1;
+            mysyslog_error("client accept failed");
         }
 
-        mysyslog_error("client accept failed");
         return -1;
     }
 
-    printf("Client connected: %s\n",
-           inet_ntoa(client_address.sin_addr));
+    printf("Client connected: %s\n", inet_ntoa(client_address.sin_addr));
 
     return client_socket;
 }
@@ -270,21 +369,13 @@ static int receive_client_request(int client_socket,
                           size - 1,
                           0);
 
-    if (bytes_received < 0)
+    if (bytes_received <= 0)
     {
         mysyslog_error("request receiving failed");
         return -1;
     }
 
-    if (bytes_received == 0)
-    {
-        mysyslog_info("client disconnected");
-        return -1;
-    }
-
     buffer[bytes_received] = '\0';
-
-    printf("Request from client: %s\n", buffer);
 
     return 0;
 }
@@ -292,10 +383,7 @@ static int receive_client_request(int client_socket,
 static int send_server_response(int client_socket,
                                 const char *response)
 {
-    if (send(client_socket,
-             response,
-             strlen(response),
-             0) < 0)
+    if (send(client_socket, response, strlen(response), 0) < 0)
     {
         mysyslog_error("response sending failed");
         return -1;
@@ -350,8 +438,8 @@ static int execute_command(const char *command,
 
     if (stdout_fd < 0)
     {
-        mysyslog_error("stdout temporary file creation failed");
         snprintf(result, result_size, "stdout temporary file creation failed\n");
+        mysyslog_error("stdout temporary file creation failed");
         return -1;
     }
 
@@ -360,8 +448,8 @@ static int execute_command(const char *command,
     if (stderr_fd < 0)
     {
         close(stdout_fd);
-        mysyslog_error("stderr temporary file creation failed");
         snprintf(result, result_size, "stderr temporary file creation failed\n");
+        mysyslog_error("stderr temporary file creation failed");
         return -1;
     }
 
@@ -379,9 +467,8 @@ static int execute_command(const char *command,
 
     if (status != 0)
     {
-        read_file_to_buffer(stderr_template, result, result_size);
-
-        if (strlen(result) == 0)
+        if (read_file_to_buffer(stderr_template, result, result_size) < 0 ||
+            strlen(result) == 0)
         {
             snprintf(result, result_size, "Command finished with error\n");
         }
@@ -389,13 +476,8 @@ static int execute_command(const char *command,
         return -1;
     }
 
-    if (read_file_to_buffer(stdout_template, result, result_size) < 0)
-    {
-        snprintf(result, result_size, "Command executed, but stdout read failed\n");
-        return -1;
-    }
-
-    if (strlen(result) == 0)
+    if (read_file_to_buffer(stdout_template, result, result_size) < 0 ||
+        strlen(result) == 0)
     {
         snprintf(result, result_size, "Command executed without output\n");
     }
@@ -405,14 +487,12 @@ static int execute_command(const char *command,
 
 static void handle_client(int client_socket)
 {
-    char request[1024];
+    char request[REQUEST_SIZE];
     char username[128];
     char command[1024];
     char result[RESULT_SIZE];
 
-    if (receive_client_request(client_socket,
-                               request,
-                               sizeof(request)) < 0)
+    if (receive_client_request(client_socket, request, sizeof(request)) < 0)
     {
         close(client_socket);
         exit(EXIT_FAILURE);
@@ -431,14 +511,12 @@ static void handle_client(int client_socket)
 
     if (!is_user_allowed(username))
     {
-        mysyslog_error("access denied");
         send_server_response(client_socket, "Access denied\n");
         close(client_socket);
         exit(EXIT_FAILURE);
     }
 
     execute_command(command, result, sizeof(result));
-
     send_server_response(client_socket, result);
 
     close(client_socket);
@@ -452,9 +530,17 @@ int main(void)
 
     set_default_config(&config);
 
-    if (load_config(CONFIG_PATH, &config) < 0)
+    if (load_config(&config) < 0)
     {
         mysyslog_info("default server configuration is used");
+    }
+
+    if (config.daemon_mode)
+    {
+        if (start_daemon_mode() < 0)
+        {
+            return EXIT_FAILURE;
+        }
     }
 
     setup_signal_handlers();
@@ -473,8 +559,6 @@ int main(void)
         return EXIT_FAILURE;
     }
 
-    mysyslog_info("server socket bound");
-
     if (start_listening(server_socket) < 0)
     {
         close(server_socket);
@@ -491,9 +575,14 @@ int main(void)
         if (reload_config)
         {
             set_default_config(&config);
-            load_config(CONFIG_PATH, &config);
+            load_config(&config);
             reload_config = 0;
             mysyslog_info("configuration reloaded");
+        }
+
+        if (child_finished)
+        {
+            reap_child_processes();
         }
 
         client_socket = accept_client(server_socket);
