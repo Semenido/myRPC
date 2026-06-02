@@ -13,6 +13,7 @@
 #define CONFIG_PATH "../configs/myRPC.conf"
 #define USERS_PATH "../configs/users.conf"
 #define RESULT_SIZE 4096
+#define TMP_OUTPUT_PATH "/tmp/myRPC_result.stdout"
 
 typedef struct
 {
@@ -235,6 +236,24 @@ static int receive_client_request(int client_socket,
     return 0;
 }
 
+static int save_result_to_file(const char *result)
+{
+    FILE *file;
+
+    file = fopen(TMP_OUTPUT_PATH, "w");
+
+    if (file == NULL)
+    {
+        mysyslog_error("temporary output file open failed");
+        return -1;
+    }
+
+    fprintf(file, "%s", result);
+    fclose(file);
+
+    return 0;
+}
+
 static int execute_command(const char *command,
                            char *result,
                            size_t result_size)
@@ -276,6 +295,8 @@ static int execute_command(const char *command,
     {
         snprintf(result, result_size, "Command executed without output\n");
     }
+
+    save_result_to_file(result);
 
     return 0;
 }
