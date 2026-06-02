@@ -109,6 +109,8 @@ static int send_command_to_server(const ClientConfig *config)
 {
     int client_socket;
     struct sockaddr_in server_address;
+    char buffer[1024];
+    ssize_t bytes_received;
 
     client_socket = socket(AF_INET, SOCK_STREAM, 0);
 
@@ -150,6 +152,24 @@ static int send_command_to_server(const ClientConfig *config)
     }
 
     printf("Command sent to server\n");
+
+    memset(buffer, 0, sizeof(buffer));
+
+    bytes_received = recv(client_socket,
+                          buffer,
+                          sizeof(buffer) - 1,
+                          0);
+
+    if (bytes_received < 0)
+    {
+        perror("recv");
+        close(client_socket);
+        return -1;
+    }
+
+    buffer[bytes_received] = '\0';
+
+    printf("Server response: %s", buffer);
 
     close(client_socket);
 
