@@ -6,7 +6,7 @@ client:
 	$(MAKE) -C client
 
 server:
-$(MAKE) -C server
+	$(MAKE) -C server
 
 clean:
 	$(MAKE) -C client clean

@@ -162,6 +162,22 @@ static int receive_client_request(int client_socket)
     return 0;
 }
 
+static int send_server_response(int client_socket)
+{
+    const char *response = "Request received\n";
+
+    if (send(client_socket,
+             response,
+             strlen(response),
+             0) < 0)
+    {
+        perror("send");
+        return -1;
+    }
+
+    return 0;
+}
+
 int main(void)
 {
     ServerConfig config;
@@ -211,6 +227,13 @@ int main(void)
     printf("Client accepted\n");
 
     if (receive_client_request(client_socket) < 0)
+    {
+        close(client_socket);
+        close(server_socket);
+        return EXIT_FAILURE;
+    }
+
+    if (send_server_response(client_socket) < 0)
     {
         close(client_socket);
         close(server_socket);
