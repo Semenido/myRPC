@@ -9,20 +9,21 @@
 
 #define DEFAULT_HOST "127.0.0.1"
 #define DEFAULT_PORT 8642
+#define DEFAULT_USER "semakan"
 
 typedef struct
 {
     char host[128];
     int port;
     int use_stream;
+    char username[128];
     char command[512];
 } ClientConfig;
 
 static void print_help(const char *program_name)
 {
     printf("Usage: %s [OPTIONS]\n", program_name);
-    printf("\n");
-    printf("Options:\n");
+    printf("  -u, --user USER         User name\n");
     printf("  -c, --command COMMAND   Bash command to execute\n");
     printf("  -h, --host HOST         Server address\n");
     printf("  -p, --port PORT         Server port\n");
@@ -34,6 +35,7 @@ static void print_help(const char *program_name)
 static void set_default_config(ClientConfig *config)
 {
     strcpy(config->host, DEFAULT_HOST);
+    strcpy(config->username, DEFAULT_USER);
     config->port = DEFAULT_PORT;
     config->use_stream = 1;
     config->command[0] = '\0';
@@ -45,6 +47,7 @@ static int parse_arguments(int argc, char *argv[], ClientConfig *config)
 
     static struct option long_options[] =
     {
+        {"user", required_argument, 0, 'u'},
         {"command", required_argument, 0, 'c'},
         {"host", required_argument, 0, 'h'},
         {"port", required_argument, 0, 'p'},
@@ -54,10 +57,15 @@ static int parse_arguments(int argc, char *argv[], ClientConfig *config)
         {0, 0, 0, 0}
     };
 
-    while ((option = getopt_long(argc, argv, "c:h:p:sd", long_options, NULL)) != -1)
+    while ((option = getopt_long(argc, argv, "u:c:h:p:sd", long_options, NULL)) != -1)
     {
         switch (option)
         {
+            case 'u':
+                strncpy(config->username, optarg, sizeof(config->username) - 1);
+                config->username[sizeof(config->username) - 1] = '\0';
+                break;
+
             case 'c':
                 strncpy(config->command, optarg, sizeof(config->command) - 1);
                 config->command[sizeof(config->command) - 1] = '\0';
@@ -105,12 +113,39 @@ static int parse_arguments(int argc, char *argv[], ClientConfig *config)
     return 0;
 }
 
+static int build_request(const ClientConfig *config,
+                         char *request,
+                         size_t request_size)
+{
+    int written;
+
+    written = snprintf(request,
+                       request_size,
+                       "%s|%s",
+                       config->username,
+                       config->command);
+
+    if (written < 0 || (size_t)written >= request_size)
+    {
+        fprintf(stderr, "Error: request is too long\n");
+        return -1;
+    }
+
+    return 0;
+}
+
 static int send_command_to_server(const ClientConfig *config)
 {
     int client_socket;
     struct sockaddr_in server_address;
-    char buffer[1024];
+    char request[1024];
+    char buffer[4096];
     ssize_t bytes_received;
+
+    if (build_request(config, request, sizeof(request)) < 0)
+    {
+        return -1;
+    }
 
     client_socket = socket(AF_INET, SOCK_STREAM, 0);
 
@@ -141,17 +176,12 @@ static int send_command_to_server(const ClientConfig *config)
         return -1;
     }
 
-    if (send(client_socket,
-             config->command,
-             strlen(config->command),
-             0) < 0)
+    if (send(client_socket, request, strlen(request), 0) < 0)
     {
         perror("send");
         close(client_socket);
         return -1;
     }
-
-    printf("Command sent to server\n");
 
     memset(buffer, 0, sizeof(buffer));
 
@@ -169,7 +199,7 @@ static int send_command_to_server(const ClientConfig *config)
 
     buffer[bytes_received] = '\0';
 
-    printf("Server response: %s", buffer);
+    printf("%s", buffer);
 
     close(client_socket);
 
@@ -187,15 +217,5 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    printf("Host: %s\n", config.host);
-    printf("Port: %d\n", config.port);
-    printf("Socket type: %s\n", config.use_stream ? "TCP stream" : "UDP datagram");
-    printf("Command: %s\n", config.command);
-
-    if (send_command_to_server(&config) < 0)
-    {
-        return EXIT_FAILURE;
-    }
-
-    return EXIT_SUCCESS;
+    return send_command_to_server(&config) == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 }
