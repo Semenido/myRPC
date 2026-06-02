@@ -64,6 +64,17 @@ static int bind_server_socket(int server_socket, int port)
     return 0;
 }
 
+static int start_listening(int server_socket)
+{
+    if (listen(server_socket, 5) < 0)
+    {
+        perror("listen");
+        return -1;
+    }
+
+    return 0;
+}
+
 int main(void)
 {
     ServerConfig config;
@@ -86,6 +97,14 @@ int main(void)
     }
 
     printf("Server bound to port %d\n", config.port);
+
+    if (start_listening(server_socket) < 0)
+{
+    close(server_socket);
+    return EXIT_FAILURE;
+}
+
+printf("Server is listening\n");
 
     close(server_socket);
 
