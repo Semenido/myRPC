@@ -131,16 +131,17 @@ static int accept_client(int server_socket)
     return client_socket;
 }
 
-static int receive_client_request(int client_socket)
+static int receive_client_request(int client_socket,
+                                  char *buffer,
+                                  size_t size)
 {
-    char buffer[1024];
     ssize_t bytes_received;
 
-    memset(buffer, 0, sizeof(buffer));
+    memset(buffer, 0, size);
 
     bytes_received = recv(client_socket,
                           buffer,
-                          sizeof(buffer) - 1,
+                          size - 1,
                           0);
 
     if (bytes_received < 0)
@@ -152,7 +153,7 @@ static int receive_client_request(int client_socket)
     if (bytes_received == 0)
     {
         printf("Client disconnected\n");
-        return 0;
+        return -1;
     }
 
     buffer[bytes_received] = '\0';
@@ -162,11 +163,53 @@ static int receive_client_request(int client_socket)
     return 0;
 }
 
+static int execute_command(const char *command)
+{
+    FILE *pipe;
+    char buffer[256];
+
+    pipe = popen(command, "r");
+
+    if (pipe == NULL)
+    {
+        perror("popen");
+        return -1;
+    }
+
+    printf("Command output:\n");
+
+    while (fgets(buffer, sizeof(buffer), pipe) != NULL)
+    {
+        printf("%s", buffer);
+    }
+
+    pclose(pipe);
+
+    return 0;
+}
+
+static int send_server_response(int client_socket)
+{
+    const char *response = "Command executed\n";
+
+    if (send(client_socket,
+             response,
+             strlen(response),
+             0) < 0)
+    {
+        perror("send");
+        return -1;
+    }
+
+    return 0;
+}
+
 int main(void)
 {
     ServerConfig config;
     int server_socket;
     int client_socket;
+    char command[1024];
 
     set_default_config(&config);
 
@@ -210,7 +253,23 @@ int main(void)
 
     printf("Client accepted\n");
 
-    if (receive_client_request(client_socket) < 0)
+    if (receive_client_request(client_socket,
+                               command,
+                               sizeof(command)) < 0)
+    {
+        close(client_socket);
+        close(server_socket);
+        return EXIT_FAILURE;
+    }
+
+    if (execute_command(command) < 0)
+    {
+        close(client_socket);
+        close(server_socket);
+        return EXIT_FAILURE;
+    }
+
+    if (send_server_response(client_socket) < 0)
     {
         close(client_socket);
         close(server_socket);
