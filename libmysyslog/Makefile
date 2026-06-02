@@ -14,5 +14,9 @@ $(OBJ): $(SRC)
 	$(CC) $(CFLAGS) -c $(SRC)
 
 clean:
+<<<<<<< HEAD
 	rm -f $(TARGET) $(OBJ)
 	
+=======
+	rm -f $(TARGET) $(OBJ)
+>>>>>>> feature/logger

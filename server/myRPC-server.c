@@ -236,6 +236,7 @@ static int receive_client_request(int client_socket,
     return 0;
 }
 
+<<<<<<< HEAD
 static int save_result_to_file(const char *result)
 {
     FILE *file;
@@ -304,12 +305,22 @@ static int execute_command(const char *command,
 static int send_server_response(int client_socket,
                                 const char *response)
 {
+=======
+static int send_server_response(int client_socket)
+{
+    const char *response = "Request received\n";
+
+>>>>>>> feature/logger
     if (send(client_socket,
              response,
              strlen(response),
              0) < 0)
     {
+<<<<<<< HEAD
         mysyslog_error("response sending failed");
+=======
+        perror("send");
+>>>>>>> feature/logger
         return -1;
     }
 
@@ -398,6 +409,13 @@ int main(void)
     execute_command(command, result, sizeof(result));
 
     if (send_server_response(client_socket, result) < 0)
+    {
+        close(client_socket);
+        close(server_socket);
+        return EXIT_FAILURE;
+    }
+
+    if (send_server_response(client_socket) < 0)
     {
         close(client_socket);
         close(server_socket);
