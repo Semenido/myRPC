@@ -1,7 +1,11 @@
+#include <arpa/inet.h>
 #include <getopt.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 #define DEFAULT_HOST "127.0.0.1"
 #define DEFAULT_PORT 8642
@@ -101,6 +105,57 @@ static int parse_arguments(int argc, char *argv[], ClientConfig *config)
     return 0;
 }
 
+static int send_command_to_server(const ClientConfig *config)
+{
+    int client_socket;
+    struct sockaddr_in server_address;
+
+    client_socket = socket(AF_INET, SOCK_STREAM, 0);
+
+    if (client_socket < 0)
+    {
+        perror("socket");
+        return -1;
+    }
+
+    memset(&server_address, 0, sizeof(server_address));
+
+    server_address.sin_family = AF_INET;
+    server_address.sin_port = htons(config->port);
+
+    if (inet_pton(AF_INET, config->host, &server_address.sin_addr) <= 0)
+    {
+        perror("inet_pton");
+        close(client_socket);
+        return -1;
+    }
+
+    if (connect(client_socket,
+                (struct sockaddr *)&server_address,
+                sizeof(server_address)) < 0)
+    {
+        perror("connect");
+        close(client_socket);
+        return -1;
+    }
+
+    if (send(client_socket,
+             config->command,
+             strlen(config->command),
+             0) < 0)
+    {
+        perror("send");
+        close(client_socket);
+        return -1;
+    }
+
+    printf("Command sent to server\n");
+
+    close(client_socket);
+
+    return 0;
+}
+
 int main(int argc, char *argv[])
 {
     ClientConfig config;
@@ -116,6 +171,11 @@ int main(int argc, char *argv[])
     printf("Port: %d\n", config.port);
     printf("Socket type: %s\n", config.use_stream ? "TCP stream" : "UDP datagram");
     printf("Command: %s\n", config.command);
+
+    if (send_command_to_server(&config) < 0)
+    {
+        return EXIT_FAILURE;
+    }
 
     return EXIT_SUCCESS;
 }
