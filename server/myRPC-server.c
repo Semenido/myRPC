@@ -75,6 +75,30 @@ static int start_listening(int server_socket)
     return 0;
 }
 
+static int accept_client(int server_socket)
+{
+    struct sockaddr_in client_address;
+    socklen_t client_address_length;
+    int client_socket;
+
+    client_address_length = sizeof(client_address);
+
+    client_socket = accept(server_socket,
+                           (struct sockaddr *)&client_address,
+                           &client_address_length);
+
+    if (client_socket < 0)
+    {
+        perror("accept");
+        return -1;
+    }
+
+    printf("Client connected: %s\n",
+           inet_ntoa(client_address.sin_addr));
+
+    return client_socket;
+}
+
 int main(void)
 {
     ServerConfig config;
@@ -99,12 +123,26 @@ int main(void)
     printf("Server bound to port %d\n", config.port);
 
     if (start_listening(server_socket) < 0)
-{
-    close(server_socket);
-    return EXIT_FAILURE;
-}
+    {
+        close(server_socket);
+        return EXIT_FAILURE;
+    }
 
-printf("Server is listening\n");
+    printf("Server is listening\n");
+
+    int client_socket;
+
+    client_socket = accept_client(server_socket);
+
+    if (client_socket < 0)
+    {
+        close(server_socket);
+        return EXIT_FAILURE;
+    }
+
+    printf("Client accepted\n");
+
+    close(client_socket);
 
     close(server_socket);
 
