@@ -43,6 +43,27 @@ static int create_server_socket(void)
     return server_socket;
 }
 
+static int bind_server_socket(int server_socket, int port)
+{
+    struct sockaddr_in server_address;
+
+    memset(&server_address, 0, sizeof(server_address));
+
+    server_address.sin_family = AF_INET;
+    server_address.sin_addr.s_addr = INADDR_ANY;
+    server_address.sin_port = htons(port);
+
+    if (bind(server_socket,
+             (struct sockaddr *)&server_address,
+             sizeof(server_address)) < 0)
+    {
+        perror("bind");
+        return -1;
+    }
+
+    return 0;
+}
+
 int main(void)
 {
     ServerConfig config;
@@ -58,7 +79,13 @@ int main(void)
         return EXIT_FAILURE;
     }
 
-    printf("Server socket created\n");
+    if (bind_server_socket(server_socket, config.port) < 0)
+    {
+        close(server_socket);
+        return EXIT_FAILURE;
+    }
+
+    printf("Server bound to port %d\n", config.port);
 
     close(server_socket);
 
