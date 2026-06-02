@@ -10,6 +10,7 @@
 #define DEFAULT_SOCKET_TYPE "stream"
 #define CONFIG_PATH "../configs/myRPC.conf"
 #define USERS_PATH "../configs/users.conf"
+#define RESULT_SIZE 4096
 
 typedef struct
 {
@@ -192,27 +193,47 @@ static int receive_client_request(int client_socket,
     return 0;
 }
 
-static int execute_command(const char *command)
+static int execute_command(const char *command,
+                           char *result,
+                           size_t result_size)
 {
     FILE *pipe;
     char buffer[256];
+    size_t used;
+
+    memset(result, 0, result_size);
+    used = 0;
 
     pipe = popen(command, "r");
 
     if (pipe == NULL)
     {
         perror("popen");
+        snprintf(result, result_size, "Command execution failed\n");
         return -1;
     }
 
-    printf("Command output:\n");
-
     while (fgets(buffer, sizeof(buffer), pipe) != NULL)
     {
-        printf("%s", buffer);
+        size_t buffer_length;
+
+        buffer_length = strlen(buffer);
+
+        if (used + buffer_length >= result_size - 1)
+        {
+            break;
+        }
+
+        strcat(result, buffer);
+        used += buffer_length;
     }
 
     pclose(pipe);
+
+    if (strlen(result) == 0)
+    {
+        snprintf(result, result_size, "Command executed without output\n");
+    }
 
     return 0;
 }
@@ -238,6 +259,7 @@ int main(void)
     int server_socket;
     int client_socket;
     char command[1024];
+    char result[RESULT_SIZE];
     const char *current_user = "semakan";
 
     set_default_config(&config);
@@ -299,15 +321,9 @@ int main(void)
         return EXIT_FAILURE;
     }
 
-    if (execute_command(command) < 0)
-    {
-        send_server_response(client_socket, "Command execution failed\n");
-        close(client_socket);
-        close(server_socket);
-        return EXIT_FAILURE;
-    }
+    execute_command(command, result, sizeof(result));
 
-    if (send_server_response(client_socket, "Command executed\n") < 0)
+    if (send_server_response(client_socket, result) < 0)
     {
         close(client_socket);
         close(server_socket);
