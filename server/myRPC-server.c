@@ -9,6 +9,7 @@
 #define DEFAULT_PORT 8642
 #define DEFAULT_SOCKET_TYPE "stream"
 #define CONFIG_PATH "../configs/myRPC.conf"
+#define USERS_PATH "../configs/users.conf"
 
 typedef struct
 {
@@ -46,6 +47,34 @@ static int load_config(const char *path, ServerConfig *config)
         {
             strncpy(config->socket_type, value, sizeof(config->socket_type) - 1);
             config->socket_type[sizeof(config->socket_type) - 1] = '\0';
+        }
+    }
+
+    fclose(file);
+    return 0;
+}
+
+static int is_user_allowed(const char *username)
+{
+    FILE *file;
+    char line[128];
+
+    file = fopen(USERS_PATH, "r");
+
+    if (file == NULL)
+    {
+        perror("fopen");
+        return 0;
+    }
+
+    while (fgets(line, sizeof(line), file) != NULL)
+    {
+        line[strcspn(line, "\r\n")] = '\0';
+
+        if (strcmp(line, username) == 0)
+        {
+            fclose(file);
+            return 1;
         }
     }
 
@@ -188,10 +217,9 @@ static int execute_command(const char *command)
     return 0;
 }
 
-static int send_server_response(int client_socket)
+static int send_server_response(int client_socket,
+                                const char *response)
 {
-    const char *response = "Command executed\n";
-
     if (send(client_socket,
              response,
              strlen(response),
@@ -210,6 +238,7 @@ int main(void)
     int server_socket;
     int client_socket;
     char command[1024];
+    const char *current_user = "semakan";
 
     set_default_config(&config);
 
@@ -219,6 +248,14 @@ int main(void)
     }
 
     print_config(&config);
+
+    if (!is_user_allowed(current_user))
+    {
+        printf("Access denied for %s\n", current_user);
+        return EXIT_FAILURE;
+    }
+
+    printf("Access granted for %s\n", current_user);
 
     server_socket = create_server_socket();
 
@@ -264,12 +301,13 @@ int main(void)
 
     if (execute_command(command) < 0)
     {
+        send_server_response(client_socket, "Command execution failed\n");
         close(client_socket);
         close(server_socket);
         return EXIT_FAILURE;
     }
 
-    if (send_server_response(client_socket) < 0)
+    if (send_server_response(client_socket, "Command executed\n") < 0)
     {
         close(client_socket);
         close(server_socket);
