@@ -85,6 +85,46 @@ static int is_user_allowed(const char *username)
     return 0;
 }
 
+static int parse_request(const char *request,
+                         char *username,
+                         size_t username_size,
+                         char *command,
+                         size_t command_size)
+{
+    const char *separator;
+    size_t username_length;
+
+    separator = strchr(request, '|');
+
+    if (separator == NULL)
+    {
+        mysyslog_error("invalid request format");
+        return -1;
+    }
+
+    username_length = (size_t)(separator - request);
+
+    if (username_length == 0 || username_length >= username_size)
+    {
+        mysyslog_error("invalid username length");
+        return -1;
+    }
+
+    strncpy(username, request, username_length);
+    username[username_length] = '\0';
+
+    strncpy(command, separator + 1, command_size - 1);
+    command[command_size - 1] = '\0';
+
+    if (command[0] == '\0')
+    {
+        mysyslog_error("empty command");
+        return -1;
+    }
+
+    return 0;
+}
+
 static void print_config(const ServerConfig *config)
 {
     mysyslog_info("myRPC-server started");
@@ -260,9 +300,10 @@ int main(void)
     ServerConfig config;
     int server_socket;
     int client_socket;
+    char request[1024];
+    char username[128];
     char command[1024];
     char result[RESULT_SIZE];
-    const char *current_user = "semakan";
 
     set_default_config(&config);
 
@@ -272,14 +313,6 @@ int main(void)
     }
 
     print_config(&config);
-
-    if (!is_user_allowed(current_user))
-    {
-        mysyslog_error("access denied");
-        return EXIT_FAILURE;
-    }
-
-    mysyslog_info("access granted");
 
     server_socket = create_server_socket();
 
@@ -312,12 +345,30 @@ int main(void)
         return EXIT_FAILURE;
     }
 
-    mysyslog_info("client accepted");
-
     if (receive_client_request(client_socket,
-                               command,
-                               sizeof(command)) < 0)
+                               request,
+                               sizeof(request)) < 0)
     {
+        close(client_socket);
+        close(server_socket);
+        return EXIT_FAILURE;
+    }
+
+    if (parse_request(request,
+                      username,
+                      sizeof(username),
+                      command,
+                      sizeof(command)) < 0)
+    {
+        send_server_response(client_socket, "Invalid request format\n");
+        close(client_socket);
+        close(server_socket);
+        return EXIT_FAILURE;
+    }
+
+    if (!is_user_allowed(username))
+    {
+        send_server_response(client_socket, "Access denied\n");
         close(client_socket);
         close(server_socket);
         return EXIT_FAILURE;
