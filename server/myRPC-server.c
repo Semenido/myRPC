@@ -131,6 +131,37 @@ static int accept_client(int server_socket)
     return client_socket;
 }
 
+static int receive_client_request(int client_socket)
+{
+    char buffer[1024];
+    ssize_t bytes_received;
+
+    memset(buffer, 0, sizeof(buffer));
+
+    bytes_received = recv(client_socket,
+                          buffer,
+                          sizeof(buffer) - 1,
+                          0);
+
+    if (bytes_received < 0)
+    {
+        perror("recv");
+        return -1;
+    }
+
+    if (bytes_received == 0)
+    {
+        printf("Client disconnected\n");
+        return 0;
+    }
+
+    buffer[bytes_received] = '\0';
+
+    printf("Request from client: %s\n", buffer);
+
+    return 0;
+}
+
 int main(void)
 {
     ServerConfig config;
@@ -178,6 +209,13 @@ int main(void)
     }
 
     printf("Client accepted\n");
+
+    if (receive_client_request(client_socket) < 0)
+    {
+        close(client_socket);
+        close(server_socket);
+        return EXIT_FAILURE;
+    }
 
     close(client_socket);
     close(server_socket);
