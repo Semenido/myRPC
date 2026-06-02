@@ -8,6 +8,7 @@
 
 #define DEFAULT_PORT 8642
 #define DEFAULT_SOCKET_TYPE "stream"
+#define CONFIG_PATH "../configs/myRPC.conf"
 
 typedef struct
 {
@@ -19,6 +20,37 @@ static void set_default_config(ServerConfig *config)
 {
     config->port = DEFAULT_PORT;
     strcpy(config->socket_type, DEFAULT_SOCKET_TYPE);
+}
+
+static int load_config(const char *path, ServerConfig *config)
+{
+    FILE *file;
+    char key[64];
+    char value[64];
+
+    file = fopen(path, "r");
+
+    if (file == NULL)
+    {
+        perror("fopen");
+        return -1;
+    }
+
+    while (fscanf(file, " %63s = %63s", key, value) == 2)
+    {
+        if (strcmp(key, "port") == 0)
+        {
+            config->port = atoi(value);
+        }
+        else if (strcmp(key, "socket_type") == 0)
+        {
+            strncpy(config->socket_type, value, sizeof(config->socket_type) - 1);
+            config->socket_type[sizeof(config->socket_type) - 1] = '\0';
+        }
+    }
+
+    fclose(file);
+    return 0;
 }
 
 static void print_config(const ServerConfig *config)
@@ -103,8 +135,15 @@ int main(void)
 {
     ServerConfig config;
     int server_socket;
+    int client_socket;
 
     set_default_config(&config);
+
+    if (load_config(CONFIG_PATH, &config) < 0)
+    {
+        printf("Default server configuration is used\n");
+    }
+
     print_config(&config);
 
     server_socket = create_server_socket();
@@ -130,8 +169,6 @@ int main(void)
 
     printf("Server is listening\n");
 
-    int client_socket;
-
     client_socket = accept_client(server_socket);
 
     if (client_socket < 0)
@@ -143,7 +180,6 @@ int main(void)
     printf("Client accepted\n");
 
     close(client_socket);
-
     close(server_socket);
 
     return EXIT_SUCCESS;
